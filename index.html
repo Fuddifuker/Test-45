@@ -1,271 +1,225 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, doc, setDoc, onSnapshot, getDoc, collection, updateDoc
-} from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ATG Pay | Me</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #0f0c29; background: linear-gradient(to bottom, #0f0c29, #302b63, #24243e); min-height: 100vh; color: white; margin: 0; overflow-x: hidden; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .white-card { background: white; color: #333; }
+        .banner-purple { background: linear-gradient(90deg, #7c5cfc 0%, #6343cb 100%); }
+        .nav-active { color: #5e2d91; }
+        .nav-inactive { color: #999; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-slide { animation: slideIn 0.4s ease-out forwards; }
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-// --- Firebase Configuration ---
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'atg-pay-v3-prod';
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
 
-const GLOBAL_STYLES = `
-  @keyframes slideUpFade { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes blob { 0% { transform: translate(0px, 0px) scale(1); } 33% { transform: translate(30px, -50px) scale(1.1); } 66% { transform: translate(-20px, 20px) scale(0.9); } 100% { transform: translate(0px, 0px) scale(1); } }
-  .animate-blob { animation: blob 7s infinite alternate; }
-  .animate-slide-up { animation: slideUpFade 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-  .shimmer-bg { background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%); background-size: 200% 100%; animation: shimmer 3s infinite linear; }
-  @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-`;
+        const INITIAL_TOKENS = [
+            { id: "t1", type: "Receive", no: "20260319190112244", amount: "299.53", upi: "7849954907@ybl", utr: "823575304308", desc: "Receive ATapllpd deduct 299.530000", transactionTime: "2026-03-19 19:01:10", balance: "40.68" },
+            { id: "t2", type: "Receive", no: "20260319185442032", amount: "299.15", upi: "7849954907@ybl", utr: "288779455110", desc: "Receive ATapmo6z deduct 299.150000", transactionTime: "2026-03-18 18:53:12", balance: "40.21" }
+        ];
 
-const INITIAL_TOKENS = [
-  { id: "t1", type: "Receive", no: "20260319190112244", amount: "299.53", upi: "7849954907@ybl", utr: "823575304308", desc: "Receive ATapllpd deduct 299.530000", transactionTime: "2026-03-19 19:01:10", balance: "40.68" },
-  { id: "t2", type: "Receive", no: "20260319185442032", amount: "299.15", upi: "7849954907@ybl", utr: "288779455110", desc: "Receive ATapmo6z deduct 299.150000", transactionTime: "2026-03-18 18:53:12", balance: "40.21" }
-];
+        function App() {
+            const [activeTab, setActiveTab] = useState('me');
+            const [view, setView] = useState('main');
+            const [showAdmin, setShowAdmin] = useState(false);
+            const [user, setUser] = useState(() => {
+                const s = localStorage.getItem('atg_final_user');
+                return s ? JSON.parse(s) : { phone: '7849954907', balance: 40.68, id: "50006770", level: "LV2" };
+            });
+            const [tokens, setTokens] = useState(() => {
+                const s = localStorage.getItem('atg_final_tokens');
+                return s ? JSON.parse(s) : INITIAL_TOKENS;
+            });
+            const [editingItem, setEditingItem] = useState(null);
+            const timerRef = useRef(null);
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState('home');
-  const [currentSubView, setCurrentSubView] = useState(null);
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [userData, setUserData] = useState({ phone: '7849954907', balance: 40.68, id: "50006770", level: "LV2" });
-  const [tokens, setTokens] = useState([]);
-  const [editingToken, setEditingToken] = useState(null);
-  const [user, setUser] = useState(null);
-  const timerRef = useRef(null);
+            useEffect(() => { localStorage.setItem('atg_final_user', JSON.stringify(user)); }, [user]);
+            useEffect(() => { localStorage.setItem('atg_final_tokens', JSON.stringify(tokens)); }, [tokens]);
 
-  // Auth Initialization
-  useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
-    };
-    initAuth();
-    onAuthStateChanged(auth, setUser);
-  }, []);
+            const startHold = () => { timerRef.current = setTimeout(() => setShowAdmin(true), 3000); };
+            const endHold = () => { clearTimeout(timerRef.current); };
 
-  // Data Sync
-  useEffect(() => {
-    if (!user) return;
-    const phone = '7849954907';
-    
-    // Sync Profile
-    const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'atg_users', phone);
-    const unsubUser = onSnapshot(userRef, (snap) => {
-      if (snap.exists()) setUserData(snap.data());
-      else setDoc(userRef, userData);
-    });
-
-    // Sync Transactions
-    const tokenCol = collection(db, 'artifacts', appId, 'public', 'data', 'atg_tokens', phone, 'items');
-    const unsubTokens = onSnapshot(tokenCol, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setTokens(list.length > 0 ? list : INITIAL_TOKENS);
-    });
-
-    return () => { unsubUser(); unsubTokens(); };
-  }, [user]);
-
-  const startTimer = () => { timerRef.current = setTimeout(() => setShowAdmin(true), 3000); };
-  const clearTimer = () => { if (timerRef.current) clearTimeout(timerRef.current); };
-
-  const updateProfile = async (field, val) => {
-    const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'atg_users', userData.phone);
-    await updateDoc(userRef, { [field]: val });
-  };
-
-  const saveTokenEdit = async () => {
-    const tokenRef = doc(db, 'artifacts', appId, 'public', 'data', 'atg_tokens', userData.phone, 'items', editingToken.id);
-    await setDoc(tokenRef, editingToken, { merge: true });
-    setEditingToken(null);
-  };
-
-  return (
-    <div className="bg-[#F8F9FB] min-h-screen max-w-md mx-auto relative pb-24 font-sans overflow-x-hidden">
-      <style>{GLOBAL_STYLES}</style>
-
-      {/* --- MASTER ADMIN PANEL --- */}
-      {showAdmin && (
-        <div className="fixed inset-0 z-[1000] bg-black text-white p-6 overflow-y-auto">
-          <div className="flex justify-between items-center mb-8 border-b border-white/20 pb-4">
-            <h2 className="font-black italic text-purple-400">MASTER EDITOR</h2>
-            <button onClick={() => setShowAdmin(false)} className="bg-red-600 px-4 py-1 rounded-full text-xs font-bold uppercase">Exit</button>
-          </div>
-
-          <div className="space-y-4 mb-10 bg-white/5 p-4 rounded-2xl">
-            <p className="text-[10px] font-bold text-gray-500 uppercase">Profile Sync</p>
-            <div className="grid grid-cols-2 gap-2">
-              <input className="bg-black border border-white/20 p-2 rounded text-xs" type="number" value={userData.balance} onChange={e => updateProfile('balance', parseFloat(e.target.value))} placeholder="Balance" />
-              <input className="bg-black border border-white/20 p-2 rounded text-xs" type="text" value={userData.id} onChange={e => updateProfile('id', e.target.value)} placeholder="User ID" />
-            </div>
-          </div>
-
-          <p className="text-[10px] font-bold text-gray-500 uppercase mb-4">Transaction History Editor</p>
-          <div className="space-y-3">
-            {tokens.map(t => (
-              <div key={t.id} className="bg-white/10 p-4 rounded-xl flex justify-between items-center border border-white/10">
-                <div className="text-[10px]">
-                  <p className="font-black text-purple-300 italic">UTR: {t.utr}</p>
-                  <p>₹{t.amount} | {t.upi}</p>
+            const MenuItem = ({ icon, label, rightText, onClick, isRed }) => (
+                <div onClick={onClick} className="flex items-center justify-between p-4 border-b border-gray-50 last:border-0 active:bg-gray-50 transition-colors cursor-pointer">
+                    <div className="flex items-center space-x-3">
+                        <span className="text-xl opacity-70">{icon}</span>
+                        <span className={`text-[15px] font-medium ${isRed ? 'text-red-500' : 'text-gray-800'}`}>{label}</span>
+                    </div>
+                    <div className="flex items-center space-x-2 text-gray-400">
+                        {rightText && <span className="text-[14px]">{rightText}</span>}
+                        <span className="text-lg">›</span>
+                    </div>
                 </div>
-                <button onClick={() => setEditingToken(t)} className="bg-purple-600 px-3 py-1 rounded text-[10px] font-black uppercase">Edit</button>
-              </div>
-            ))}
-          </div>
+            );
 
-          {editingToken && (
-            <div className="fixed inset-0 z-[1100] bg-[#0a0a0a] p-6 overflow-y-auto">
-              <h3 className="font-black text-xl mb-6 italic text-purple-400">Modify Record</h3>
-              <div className="space-y-4 pb-10">
-                {Object.keys(editingToken).filter(k => k !== 'id').map(key => (
-                  <div key={key}>
-                    <label className="text-[10px] text-gray-500 uppercase font-black">{key}</label>
-                    <input className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white" value={editingToken[key]} onChange={e => setEditingToken({...editingToken, [key]: e.target.value})} />
-                  </div>
-                ))}
-                <button onClick={saveTokenEdit} className="w-full bg-emerald-600 py-4 rounded-2xl font-black uppercase shadow-2xl mt-4">Save to Cloud</button>
-                <button onClick={() => setEditingToken(null)} className="w-full text-gray-500 font-bold uppercase text-[10px] py-2 text-center">Cancel</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+            if (view === 'history') return (
+                <div className="min-h-screen bg-[#0f0c29] animate-slide pb-20">
+                    <div className="p-5 flex items-center border-b border-white/10 sticky top-0 bg-[#0f0c29]/90 backdrop-blur-xl z-50">
+                        <button onClick={() => setView('main')} className="w-10 h-10 glass rounded-full flex items-center justify-center text-xl">←</button>
+                        <h2 className="flex-1 text-center font-bold text-lg pr-10">Token History</h2>
+                    </div>
+                    <div className="p-4 space-y-4">
+                        {tokens.map(t => (
+                            <div key={t.id} className="glass p-5 rounded-[24px] border border-white/5">
+                                <div className="flex justify-between items-center mb-3">
+                                    <span className="text-[10px] font-black bg-purple-500/20 text-purple-400 px-3 py-1 rounded-full uppercase tracking-widest">{t.type}</span>
+                                    <span className="text-[10px] opacity-40">{t.transactionTime}</span>
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex justify-between text-xs"><span className="opacity-50">Amount</span><span className="font-bold text-blue-400">₹{t.amount}</span></div>
+                                    <div className="flex justify-between text-xs"><span className="opacity-50">UTR</span><span className="font-medium">{t.utr}</span></div>
+                                    <div className="flex justify-between text-xs"><span className="opacity-50">Balance</span><span className="text-green-400">₹{t.balance}</span></div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
 
-      {/* --- PREMIUM UI --- */}
-      {currentSubView === 'token_history' ? (
-        <div className="fixed inset-0 bg-white z-[150] animate-in slide-in-from-right overflow-y-auto pb-20">
-          <header className="px-4 py-4 flex items-center border-b sticky top-0 bg-white z-50">
-             <button onClick={() => setCurrentSubView(null)} className="p-2 text-[#5e2d91]"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
-             <h2 className="flex-1 text-center text-[18px] font-bold text-gray-800 pr-8 tracking-tight">Token History</h2>
-          </header>
-          <div className="p-4">
-             {tokens.sort((a,b) => b.no.localeCompare(a.no)).map(token => (
-               <div key={token.id} className="mb-8 border-b border-gray-50 pb-6 animate-slide-up">
-                 <span className="px-2 py-0.5 rounded bg-pink-100 text-pink-600 text-[10px] font-bold uppercase mb-4 inline-block">{token.type}</span>
-                 <div className="space-y-2">
-                   <TokenRow l="No" v={token.no} p />
-                   <TokenRow l="Amount" v={token.amount} p />
-                   <TokenRow l="UPI" v={token.upi} p />
-                   <TokenRow l="UTR" v={token.utr} p />
-                   <TokenRow l="Time" v={token.transactionTime} p />
-                   <TokenRow l="Desc" v={token.desc} p />
-                   <TokenRow l="Balance" v={token.balance} p />
-                 </div>
-               </div>
-             ))}
-          </div>
-        </div>
-      ) : activeTab === 'home' ? (
-        <div className="p-4 pt-6 space-y-6 animate-slide-up">
-          <header className="flex justify-between items-center">
-            <h1 className="text-2xl font-black text-[#5e2d91] italic tracking-tighter">ATG pay</h1>
-            <div className="w-10 h-10 rounded-2xl bg-white shadow-sm flex items-center justify-center text-gray-400">🔔</div>
-          </header>
+            return (
+                <div className="max-w-md mx-auto min-h-screen relative bg-white pb-24 text-gray-900">
+                    {/* MASTER ADMIN */}
+                    {showAdmin && (
+                        <div className="fixed inset-0 z-[200] bg-black text-white p-6 overflow-y-auto pb-40">
+                            <h2 className="text-xl font-black italic text-purple-400 mb-6 border-b border-white/10 pb-4">EDITOR MODE</h2>
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="text-[10px] opacity-50 uppercase font-bold block mb-2">Main Balance</label>
+                                    <input className="w-full bg-white/10 p-3 rounded-xl" type="number" value={user.balance} onChange={e => setUser({...user, balance: parseFloat(e.target.value)})} />
+                                </div>
+                                <h3 className="text-[10px] opacity-50 uppercase font-bold border-t border-white/10 pt-4">Edit Tokens</h3>
+                                {tokens.map(t => (
+                                    <div key={t.id} className="bg-white/5 p-4 rounded-xl flex justify-between items-center">
+                                        <div className="text-[10px]"><p className="text-blue-300">{t.utr}</p><p>₹{t.amount}</p></div>
+                                        <button onClick={() => setEditingItem(t)} className="bg-purple-600 px-4 py-2 rounded-lg text-[10px] font-bold">EDIT</button>
+                                    </div>
+                                ))}
+                                <button onClick={() => setShowAdmin(false)} className="w-full bg-red-600 py-4 rounded-2xl font-bold uppercase mt-10">Exit Master Mode</button>
+                            </div>
+                        </div>
+                    )}
 
-          <div className="relative overflow-hidden bg-gradient-to-br from-[#ac7cfb] to-[#5e2d91] rounded-[32px] p-7 text-white shadow-2xl shadow-purple-200">
-             <div className="shimmer-bg absolute inset-0 opacity-20"></div>
-             <div className="relative z-10">
-               <div className="flex justify-between mb-8">
-                  <div>
-                    <span className="text-[10px] font-black uppercase opacity-70 tracking-widest">Available Balance</span>
-                    <h2 className="text-3xl font-black italic tracking-tighter">₹ {userData.balance.toFixed(2)}</h2>
-                  </div>
-                  <div className="bg-white/20 px-3 py-1 rounded-full text-[9px] font-black uppercase">{userData.level}</div>
-               </div>
-               <div className="w-full bg-black/10 h-[6px] rounded-full mb-3"><div className="bg-white w-[12%] h-full rounded-full"></div></div>
-               <div className="text-center font-black text-[#fde047] text-[10px] uppercase tracking-widest">Boost rewards active ⚡</div>
-             </div>
-          </div>
+                    {/* ITEM EDITOR */}
+                    {editingItem && (
+                        <div className="fixed inset-0 z-[300] bg-[#050505] text-white p-6 overflow-y-auto">
+                            <h3 className="text-xl font-bold mb-6">Edit Record</h3>
+                            <div className="space-y-4">
+                                {Object.keys(editingItem).filter(k => k !== 'id').map(k => (
+                                    <div key={k}>
+                                        <label className="text-[10px] opacity-40 uppercase block mb-1">{k}</label>
+                                        <input className="w-full bg-white/10 p-3 rounded-xl text-sm" value={editingItem[k]} onChange={e => setEditingItem({...editingItem, [k]: e.target.value})} />
+                                    </div>
+                                ))}
+                                <button onClick={() => { setTokens(tokens.map(t => t.id === editingItem.id ? editingItem : t)); setEditingItem(null); }} className="w-full bg-green-600 py-4 rounded-xl font-bold mt-4">Save & Close</button>
+                            </div>
+                        </div>
+                    )}
 
-          <div className="bg-white rounded-[40px] p-2 shadow-xl border border-white grid grid-cols-2">
-             <HomeStat l="Balance" v={userData.balance.toFixed(2)} i="💰" />
-             <HomeStat l="Daily" v="0.00" i="📈" />
-             <HomeStat l="Recharge" v="0.00" i="💳" bt />
-             <HomeStat l="Invite" v="0.00" i="👥" bt />
-          </div>
-        </div>
-      ) : (
-        <div className="animate-slide-up">
-          <div className="bg-gradient-to-b from-[#f0e6ff] to-[#F8F9FB] px-6 pt-14 pb-10 rounded-b-[48px] relative overflow-hidden">
-            <div className="absolute -top-10 -right-10 w-40 h-40 bg-purple-200/40 rounded-full blur-3xl opacity-50"></div>
-            <div className="flex items-center space-x-5 mb-8 relative z-10">
-              <div className="w-16 h-16 rounded-3xl bg-[#5e2d91] flex items-center justify-center text-white font-black italic text-xl shadow-xl transform -rotate-3">A</div>
-              <div>
-                 <div className="text-[#5e2d91] font-black text-2xl italic tracking-tighter">{userData.phone}</div>
-                 <p 
-                   onMouseDown={startTimer} onMouseUp={clearTimer} onTouchStart={startTimer} onTouchEnd={clearTimer}
-                   className="text-[#5e2d91]/50 text-[10px] font-black uppercase tracking-widest cursor-pointer select-none"
-                 >
-                   USER ID: <span className="text-[#5e2d91] font-bold">{userData.id}</span>
-                 </p>
-              </div>
-            </div>
-            <div className="bg-white rounded-[32px] p-6 shadow-2xl border border-white flex items-center justify-between">
-              <div>
-                <span className="text-gray-400 text-[10px] font-black uppercase block mb-1">Total Assets</span>
-                <span className="text-3xl font-black text-[#5e2d91] italic tracking-tighter">₹ {userData.balance.toFixed(2)}</span>
-              </div>
-              <div className="bg-[#5e2d91] text-white w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg">⚡</div>
-            </div>
-          </div>
-          <div className="px-6 mt-8 space-y-4">
-             <MenuItem label="Token History" icon="📜" onClick={() => setCurrentSubView('token_history')} />
-             <MenuItem label="Team Data" icon="👥" />
-             <MenuItem label="Security" icon="🛡️" />
-          </div>
-        </div>
-      )}
+                    {/* TOP HEADER */}
+                    <div className="p-6 pt-10">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center space-x-2 text-[#5e2d91] font-bold">
+                                <span>👤</span>
+                                <span className="text-lg">Edit profile</span>
+                                <span className="text-xs">▾</span>
+                            </div>
+                        </div>
+                        <p 
+                            onMouseDown={startHold} onMouseUp={endHold} onTouchStart={startHold} onTouchEnd={endHold}
+                            className="text-[#5e2d91] font-semibold text-[15px] mb-8 select-none cursor-pointer"
+                        >
+                            ID: {user.id}
+                        </p>
 
-      <nav className="fixed bottom-0 w-full max-w-md bg-white/90 backdrop-blur-xl border-t flex justify-around items-center pt-3 pb-8 z-[100]">
-        <NavBtn label="Home" active={activeTab === 'home'} onClick={() => setActiveTab('home')} icon="🏠" />
-        <NavBtn label="Me" active={activeTab === 'me'} onClick={() => setActiveTab('me')} icon="👤" />
-      </nav>
-    </div>
-  );
-}
+                        <div className="flex items-baseline space-x-1 mb-1">
+                            <span className="text-[#5e2d91] opacity-60 text-xs">⚲</span>
+                            <span className="text-[#5e2d91] font-bold text-xs">Quota</span>
+                        </div>
+                        
+                        <div className="flex justify-between items-center mb-6">
+                            <div className="flex items-baseline">
+                                <span className="text-[44px] font-black text-[#5e2d91] tracking-tighter">{user.balance.toFixed(2)}</span>
+                                <span className="text-[#5e2d91] font-bold text-sm ml-2">INR</span>
+                            </div>
+                            <button className="bg-[#5e2d91] text-white px-8 py-2.5 rounded-full font-bold text-sm shadow-lg active:scale-95 transition-transform">Top up</button>
+                        </div>
+                        <p className="text-gray-400 text-sm mb-8">Reward ratio 0%</p>
 
-function TokenRow({ l, v, p }) {
-  return (
-    <div className="flex justify-between text-[13px] font-bold">
-      <span className="text-gray-400 font-medium">{l}</span>
-      <span className={p ? 'text-[#5e2d91]' : 'text-gray-700'}>{v}</span>
-    </div>
-  );
-}
+                        {/* PURPLE BANNER */}
+                        <div className="banner-purple rounded-2xl p-5 relative overflow-hidden shadow-xl mb-8">
+                            <div className="relative z-10">
+                                <h3 className="text-white font-bold text-lg leading-tight">Refer & get rewarded</h3>
+                                <p className="text-white/80 text-[15px]">Grow a team.</p>
+                                <p className="text-white/80 text-[15px]">Grow your income</p>
+                            </div>
+                            <div className="absolute right-0 top-0 h-full w-1/3 flex items-center justify-center opacity-30">
+                                <div className="w-16 h-16 border-4 border-white rounded-full flex items-center justify-center">✓</div>
+                            </div>
+                        </div>
 
-function HomeStat({ l, v, i, bt }) {
-  return (
-    <div className={`p-6 ${bt ? 'border-t' : ''} odd:border-r border-gray-50`}>
-      <span className="text-[10px] font-black uppercase text-gray-400 block mb-1 tracking-wider">{i} {l}</span>
-      <span className="text-xl font-black text-[#5e2d91] italic tracking-tighter">₹ {v}</span>
-    </div>
-  );
-}
+                        {/* MENU LIST */}
+                        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden mb-12">
+                            <MenuItem icon="⏰" label="Recharge History" />
+                            <MenuItem icon="📄" label="Token History" onClick={() => setView('history')} />
+                            <MenuItem icon="🌐" label="Languages" rightText="English" />
+                            <MenuItem icon="✳️" label="Google Authentication" />
+                            <MenuItem icon="💬" label="Contact Us" />
+                            <MenuItem icon="↳" label="Sign Out" isRed={true} />
+                        </div>
+                    </div>
 
-function MenuItem({ label, icon, onClick }) {
-  return (
-    <div onClick={onClick} className="bg-white p-5 rounded-[24px] flex justify-between items-center shadow-sm cursor-pointer active:scale-95 transition-all">
-      <div className="flex items-center space-x-4">
-        <span className="text-xl">{icon}</span>
-        <span className="font-black text-[#5e2d91] text-xs uppercase tracking-tight">{label}</span>
-      </div>
-      <span className="text-[#5e2d91] font-black opacity-30">→</span>
-    </div>
-  );
-}
+                    {/* FLOATING CHAT */}
+                    <div className="fixed bottom-24 right-6 z-[100] animate-bounce-slow">
+                        <div className="w-16 h-16 bg-[#3a1c71] rounded-full shadow-2xl flex items-center justify-center border-4 border-white/5 active:scale-90 transition-transform">
+                            <div className="w-6 h-6 bg-white rounded-full rounded-tr-none"></div>
+                        </div>
+                    </div>
 
-function NavBtn({ label, active, onClick, icon }) {
-  return (
-    <button onClick={onClick} className={`flex flex-col items-center transition-all ${active ? 'opacity-100 scale-110' : 'opacity-20'}`}>
-      <span className="text-2xl mb-1">{icon}</span>
-      <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
-      {active && <div className="w-1 h-1 bg-[#5e2d91] rounded-full mt-1"></div>}
-    </button>
-  );
-}
+                    {/* NAVIGATION BAR */}
+                    <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-100 flex justify-around items-center pt-3 pb-8 z-50">
+                        <div onClick={() => setActiveTab('home')} className="flex flex-col items-center opacity-40">
+                            <span className="text-2xl">🏠</span>
+                            <span className="text-[10px] mt-1 font-bold">Home</span>
+                        </div>
+                        <div className="flex flex-col items-center opacity-40">
+                            <span className="text-2xl">💳</span>
+                            <span className="text-[10px] mt-1 font-bold">Payment</span>
+                        </div>
+                        <div className="flex flex-col items-center opacity-40">
+                            <span className="text-2xl">💼</span>
+                            <span className="text-[10px] mt-1 font-bold">UPI</span>
+                        </div>
+                        <div className="flex flex-col items-center opacity-40">
+                            <span className="text-2xl">👥</span>
+                            <span className="text-[10px] mt-1 font-bold">Team</span>
+                        </div>
+                        <div onClick={() => setActiveTab('me')} className="flex flex-col items-center text-[#5e2d91]">
+                            <span className="text-2xl">👤</span>
+                            <span className="text-[10px] mt-1 font-black">Me</span>
+                        </div>
+                    </nav>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
 
